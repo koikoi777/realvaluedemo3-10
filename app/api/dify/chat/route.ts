@@ -7,11 +7,13 @@ const DIFY_API_KEY = process.env.DIFY_API_KEY;
 
 /**
  * Dify APIのチャットエンドポイントにリクエストを送信する
+ * 注意: このAPIはワークフローアプリケーションではなく、
+ * チャットアプリケーション用のAPIです。
  */
 export async function POST(request: NextRequest) {
   try {
     // リクエストボディを取得
-    const { message, conversation_id } = await request.json();
+    const { message, conversation_id, inputs = {} } = await request.json();
 
     if (!message) {
       return NextResponse.json(
@@ -31,15 +33,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 入力データの準備
+    const requestData: any = {
+      inputs: {
+        ...inputs,
+        query: message
+      },
+      response_mode: 'blocking',
+      user: 'user-' + Date.now() // 一意のユーザーID
+    };
+
+    // 会話IDが指定されている場合は追加
+    if (conversation_id) {
+      requestData.conversation_id = conversation_id;
+    }
+
     // Dify APIリクエスト
     const response = await axios.post(
       `${difyApiUrl}/chat-messages`,
-      {
-        query: message,
-        response_mode: 'blocking',
-        conversation_id: conversation_id,
-        user: 'user-' + Date.now() // 一意のユーザーID
-      },
+      requestData,
       {
         headers: {
           'Content-Type': 'application/json',

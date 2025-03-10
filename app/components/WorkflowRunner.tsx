@@ -13,11 +13,22 @@ interface InputField {
   type: InputFieldType;
   placeholder: string;
   options?: { value: string; label: string }[];
+  isFileInput?: boolean;
 }
 
 interface WorkflowRunnerProps {
   workflowId: string;
   inputFields: InputField[];
+}
+
+// アップロードされたファイル情報
+interface UploadedFile {
+  id: string;
+  name: string;
+  size: number;
+  extension: string;
+  mime_type: string;
+  field: string; // どの入力フィールドに関連するか
 }
 
 export default function WorkflowRunner({ workflowId, inputFields }: WorkflowRunnerProps) {
@@ -27,8 +38,10 @@ export default function WorkflowRunner({ workflowId, inputFields }: WorkflowRunn
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('一度だけ実行');
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [responseMode, setResponseMode] = useState<'blocking' | 'streaming'>('blocking');
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [currentFileField, setCurrentFileField] = useState<string>('');
 
   // 入力値の変更を処理
   const handleInputChange = (name: string, value: string) => {
@@ -36,76 +49,136 @@ export default function WorkflowRunner({ workflowId, inputFields }: WorkflowRunn
   };
 
   // ファイルアップロード処理
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
-    if (files && files.length > 0) {
+    if (files && files.length > 0 && currentFileField) {
       const file = files[0];
-      setUploadedFile(file);
+      setLoading(true);
       
-      // ファイル名を表示するためにテキストエリアに情報を追加
-      const textFieldName = inputFields.find(f => f.type === 'textarea')?.name;
-      if (textFieldName) {
-        setInputs(prev => ({ 
-          ...prev, 
-          [textFieldName]: prev[textFieldName] ? 
-            `${prev[textFieldName]}\n\n[ファイル: ${file.name}]` : 
-            `[ファイル: ${file.name}]` 
-        }));
+      try {
+        // FormDataを作成
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('user', 'user-' + Date.now());
+        
+        // ファイルタイプを決定
+        let fileType = 'document';
+        const extension = file.name.split('.').pop()?.toLowerCase();
+        if (extension && ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(extension)) {
+          fileType = 'image';
+        } else if (extension && ['mp3', 'm4a', 'wav', 'webm', 'amr'].includes(extension)) {
+          fileType = 'audio';
+        } else if (extension && ['mp4', 'mov', 'mpeg', 'mpga'].includes(extension)) {
+          fileType = 'video';
+        }
+        
+        formData.append('type', fileType);
+        
+        // APIにファイルをアップロード
+        const response = await axios.post('/api/dify/files/upload', formData);
+        
+        if (response.data.success) {
+          // アップロードされたファイル情報を保存
+          const uploadedFile: UploadedFile = {
+            ...response.data,
+            field: currentFileField
+          };
+          
+          setUploadedFiles(prev => [...prev, uploadedFile]);
+          
+          // ファイル名を表示するためにテキストエリアに情報を追加
+          setInputs(prev => ({ 
+            ...prev, 
+            [currentFileField]: prev[currentFileField] ? 
+              `${prev[currentFileField]}\n\n[ファイル: ${file.name} (アップロード済み)]` : 
+              `[ファイル: ${file.name} (アップロード済み)]` 
+          }));
+        } else {
+          setError(response.data.error || 'ファイルアップロードに失敗しました');
+        }
+      } catch (err: any) {
+        console.error('File Upload Error:', err);
+        setError(err.response?.data?.error || 'ファイルアップロード中にエラーが発生しました');
+      } finally {
+        setLoading(false);
       }
     }
   };
 
   // ファイルアップロードボタンのクリックハンドラ
-  const handleUploadButtonClick = () => {
+  const handleUploadButtonClick = (fieldName: string) => {
+    setCurrentFileField(fieldName);
     fileInputRef.current?.click();
   };
 
   // URLからファイルを取得
-  const handleUrlUpload = () => {
+  const handleUrlUpload = (fieldName: string) => {
     const url = prompt('ファイルのURLを入力してください:');
     if (url) {
       // URLの情報をテキストエリアに追加
-      const textFieldName = inputFields.find(f => f.type === 'textarea')?.name;
-      if (textFieldName) {
-        setInputs(prev => ({ 
-          ...prev, 
-          [textFieldName]: prev[textFieldName] ? 
-            `${prev[textFieldName]}\n\n[ファイルURL: ${url}]` : 
-            `[ファイルURL: ${url}]` 
-        }));
-      }
+      setInputs(prev => ({ 
+        ...prev, 
+        [fieldName]: prev[fieldName] ? 
+          `${prev[fieldName]}\n\n[ファイルURL: ${url}]` : 
+          `[ファイルURL: ${url}]` 
+      }));
     }
   };
 
   // ワークフロー実行
   const runWorkflow = async () => {
+    if (!workflowId) {
+      setError('ワークフローIDを入力してください');
+      return;
+    }
+    
     setLoading(true);
     setError(null);
     
     try {
-      // FormDataを作成
-      const formData = new FormData();
-      formData.append('workflowId', workflowId);
+      // 入力データを準備
+      const formattedInputs: Record<string, any> = {};
       
-      // 入力値をFormDataに追加
+      // 各入力フィールドを処理
       Object.entries(inputs).forEach(([key, value]) => {
-        formData.append(`inputs[${key}]`, value);
-      });
-      
-      // ファイルがある場合は追加
-      if (uploadedFile) {
-        formData.append('file', uploadedFile);
-      }
-      
-      // multipart/form-dataとしてAPIにリクエスト
-      const response = await axios.post('/api/dify/workflow', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
+        // 入力値が空でない場合のみ追加
+        if (value && value.trim() !== '') {
+          formattedInputs[key] = value;
         }
       });
       
+      // アップロードされたファイルを入力に追加
+      uploadedFiles.forEach(file => {
+        formattedInputs[file.field] = {
+          transfer_method: 'local_file',
+          upload_file_id: file.id,
+          type: file.mime_type.startsWith('image/') ? 'image' : 'document'
+        };
+      });
+      
+      // JSONデータとしてAPIにリクエスト
+      const response = await axios.post('/api/dify/workflow', {
+        workflowId,
+        inputs: formattedInputs,
+        response_mode: responseMode
+      });
+      
       if (response.data.success) {
-        setResult(response.data.result);
+        // レスポンスデータを整形
+        if (response.data.data && response.data.data.outputs) {
+          // outputsオブジェクトがある場合はそれを表示
+          const outputs = response.data.data.outputs;
+          if (typeof outputs === 'object') {
+            setResult(JSON.stringify(outputs, null, 2));
+          } else if (typeof outputs === 'string') {
+            setResult(outputs);
+          } else {
+            setResult(JSON.stringify(response.data.data, null, 2));
+          }
+        } else {
+          // 完全なレスポンスデータを表示
+          setResult(JSON.stringify(response.data, null, 2));
+        }
       } else {
         setError(response.data.error || 'ワークフロー実行中にエラーが発生しました');
       }
@@ -176,7 +249,7 @@ export default function WorkflowRunner({ workflowId, inputFields }: WorkflowRunn
         ref={fileInputRef}
         onChange={handleFileUpload}
         className="hidden"
-        accept=".jpg,.jpeg,.png,.gif,.webp,.svg"
+        accept=".jpg,.jpeg,.png,.gif,.webp,.svg,.pdf,.txt,.docx,.doc,.xlsx,.xls,.csv,.mp3,.m4a,.wav,.webm,.mp4,.mov"
       />
       
       {/* タブナビゲーション */}
@@ -204,6 +277,53 @@ export default function WorkflowRunner({ workflowId, inputFields }: WorkflowRunn
       </div>
 
       <div className="space-y-4">
+        {/* レスポンスモード選択 */}
+        <div className="mb-4">
+          <label className="block mb-1 text-sm">レスポンスモード</label>
+          <div className="flex space-x-4">
+            <label className="inline-flex items-center">
+              <input
+                type="radio"
+                className="form-radio h-4 w-4 text-blue-600"
+                checked={responseMode === 'blocking'}
+                onChange={() => setResponseMode('blocking')}
+              />
+              <span className="ml-2 text-sm text-gray-700">ブロッキング（完了後に結果を返す）</span>
+            </label>
+            <label className="inline-flex items-center">
+              <input
+                type="radio"
+                className="form-radio h-4 w-4 text-blue-600"
+                checked={responseMode === 'streaming'}
+                onChange={() => setResponseMode('streaming')}
+              />
+              <span className="ml-2 text-sm text-gray-700">ストリーミング（リアルタイム）</span>
+            </label>
+          </div>
+        </div>
+
+        {/* アップロードされたファイル一覧 */}
+        {uploadedFiles.length > 0 && (
+          <div className="mb-4">
+            <h3 className="text-sm font-medium mb-2">アップロード済みファイル</h3>
+            <ul className="bg-gray-50 p-2 rounded-md text-sm">
+              {uploadedFiles.map((file, index) => (
+                <li key={index} className="flex items-center justify-between py-1">
+                  <span>{file.name} ({(file.size / 1024).toFixed(1)} KB)</span>
+                  <button
+                    onClick={() => {
+                      setUploadedFiles(prev => prev.filter((_, i) => i !== index));
+                    }}
+                    className="text-red-500 hover:text-red-700"
+                  >
+                    削除
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {inputFields.map(field => (
           <div key={field.name} className="mb-4">
             <label htmlFor={field.name} className="block mb-1 text-sm">
@@ -216,7 +336,7 @@ export default function WorkflowRunner({ workflowId, inputFields }: WorkflowRunn
                   <button 
                     className="bg-gray-100 hover:bg-gray-200 p-2 rounded-md flex items-center justify-center"
                     title="ローカルアップロード"
-                    onClick={handleUploadButtonClick}
+                    onClick={() => handleUploadButtonClick(field.name)}
                     type="button"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -226,7 +346,7 @@ export default function WorkflowRunner({ workflowId, inputFields }: WorkflowRunn
                   <button 
                     className="bg-gray-100 hover:bg-gray-200 p-2 rounded-md flex items-center justify-center"
                     title="ファイルリンクの貼り付け"
-                    onClick={handleUrlUpload}
+                    onClick={() => handleUrlUpload(field.name)}
                     type="button"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -245,7 +365,7 @@ export default function WorkflowRunner({ workflowId, inputFields }: WorkflowRunn
             onClick={() => {
               setInputs({});
               setResult('');
-              setUploadedFile(null);
+              setUploadedFiles([]);
             }}
             className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 focus:outline-none"
           >
@@ -253,7 +373,7 @@ export default function WorkflowRunner({ workflowId, inputFields }: WorkflowRunn
           </button>
           <button
             onClick={runWorkflow}
-            disabled={loading}
+            disabled={loading || !workflowId}
             className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 flex items-center"
           >
             {loading ? (
