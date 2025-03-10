@@ -18,7 +18,8 @@ export async function POST(request: NextRequest) {
     }
 
     // リクエストボディからパラメータを取得
-    const { workflowId, inputs, response_mode = 'blocking' } = await request.json();
+    const { workflowId, inputs } = await request.json();
+    const response_mode = 'blocking'; // 常にブロッキングモードを使用
 
     if (!workflowId) {
       return NextResponse.json(

@@ -37,8 +37,6 @@ export default function WorkflowRunner({ workflowId, inputFields }: WorkflowRunn
   const [result, setResult] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState('一度だけ実行');
-  const [responseMode, setResponseMode] = useState<'blocking' | 'streaming'>('blocking');
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [currentFileField, setCurrentFileField] = useState<string>('');
@@ -128,7 +126,7 @@ export default function WorkflowRunner({ workflowId, inputFields }: WorkflowRunn
   // ワークフロー実行
   const runWorkflow = async () => {
     if (!workflowId) {
-      setError('ワークフローIDを入力してください');
+      setError('ワークフローIDが設定されていません');
       return;
     }
     
@@ -159,8 +157,7 @@ export default function WorkflowRunner({ workflowId, inputFields }: WorkflowRunn
       // JSONデータとしてAPIにリクエスト
       const response = await axios.post('/api/dify/workflow', {
         workflowId,
-        inputs: formattedInputs,
-        response_mode: responseMode
+        inputs: formattedInputs
       });
       
       if (response.data.success) {
@@ -252,56 +249,7 @@ export default function WorkflowRunner({ workflowId, inputFields }: WorkflowRunn
         accept=".jpg,.jpeg,.png,.gif,.webp,.svg,.pdf,.txt,.docx,.doc,.xlsx,.xls,.csv,.mp3,.m4a,.wav,.webm,.mp4,.mov"
       />
       
-      {/* タブナビゲーション */}
-      <div className="flex border-b mb-4">
-        <button
-          className={`py-2 px-4 text-sm font-medium ${
-            activeTab === '一度だけ実行' 
-              ? 'border-b-2 border-blue-600 text-blue-600' 
-              : 'text-gray-500 hover:text-gray-700'
-          }`}
-          onClick={() => setActiveTab('一度だけ実行')}
-        >
-          一度だけ実行
-        </button>
-        <button
-          className={`py-2 px-4 text-sm font-medium ${
-            activeTab === '一括実行' 
-              ? 'border-b-2 border-blue-600 text-blue-600' 
-              : 'text-gray-500 hover:text-gray-700'
-          }`}
-          onClick={() => setActiveTab('一括実行')}
-        >
-          一括実行
-        </button>
-      </div>
-
       <div className="space-y-4">
-        {/* レスポンスモード選択 */}
-        <div className="mb-4">
-          <label className="block mb-1 text-sm">レスポンスモード</label>
-          <div className="flex space-x-4">
-            <label className="inline-flex items-center">
-              <input
-                type="radio"
-                className="form-radio h-4 w-4 text-blue-600"
-                checked={responseMode === 'blocking'}
-                onChange={() => setResponseMode('blocking')}
-              />
-              <span className="ml-2 text-sm text-gray-700">ブロッキング（完了後に結果を返す）</span>
-            </label>
-            <label className="inline-flex items-center">
-              <input
-                type="radio"
-                className="form-radio h-4 w-4 text-blue-600"
-                checked={responseMode === 'streaming'}
-                onChange={() => setResponseMode('streaming')}
-              />
-              <span className="ml-2 text-sm text-gray-700">ストリーミング（リアルタイム）</span>
-            </label>
-          </div>
-        </div>
-
         {/* アップロードされたファイル一覧 */}
         {uploadedFiles.length > 0 && (
           <div className="mb-4">
@@ -329,7 +277,7 @@ export default function WorkflowRunner({ workflowId, inputFields }: WorkflowRunn
             <label htmlFor={field.name} className="block mb-1 text-sm">
               {field.label}
             </label>
-            {field.type === 'textarea' && (
+            {field.isFileInput && (
               <div className="relative">
                 {renderInputField(field)}
                 <div className="absolute bottom-3 right-3 flex space-x-2">
@@ -356,7 +304,7 @@ export default function WorkflowRunner({ workflowId, inputFields }: WorkflowRunn
                 </div>
               </div>
             )}
-            {field.type !== 'textarea' && renderInputField(field)}
+            {!field.isFileInput && renderInputField(field)}
           </div>
         ))}
         
@@ -373,7 +321,7 @@ export default function WorkflowRunner({ workflowId, inputFields }: WorkflowRunn
           </button>
           <button
             onClick={runWorkflow}
-            disabled={loading || !workflowId}
+            disabled={loading}
             className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 flex items-center"
           >
             {loading ? (
