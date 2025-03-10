@@ -21,7 +21,11 @@ export async function POST(request: NextRequest) {
     
     // 入力値を取得
     const inputs: Record<string, string> = {};
-    for (const [key, value] of formData.entries()) {
+    // FormDataのエントリーを反復処理する代替方法
+    const entries = Array.from(formData.entries());
+    for (const entry of entries) {
+      const key = entry[0];
+      const value = entry[1];
       if (key.startsWith('inputs[') && key.endsWith(']')) {
         const inputKey = key.slice(7, -1); // 'inputs[key]' から 'key' を取得
         inputs[inputKey] = value as string;

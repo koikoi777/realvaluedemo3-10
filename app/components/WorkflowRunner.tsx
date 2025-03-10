@@ -97,6 +97,7 @@ export default function WorkflowRunner({ workflowId, inputFields }: WorkflowRunn
         formData.append('file', uploadedFile);
       }
       
+      // multipart/form-dataとしてAPIにリクエスト
       const response = await axios.post('/api/dify/workflow', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
@@ -108,9 +109,9 @@ export default function WorkflowRunner({ workflowId, inputFields }: WorkflowRunn
       } else {
         setError(response.data.error || 'ワークフロー実行中にエラーが発生しました');
       }
-    } catch (err) {
-      setError('APIリクエスト中にエラーが発生しました');
-      console.error(err);
+    } catch (err: any) {
+      console.error('API Error:', err);
+      setError(err.response?.data?.error || 'APIリクエスト中にエラーが発生しました');
     } finally {
       setLoading(false);
     }
